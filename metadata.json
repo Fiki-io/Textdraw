@@ -1,0 +1,6 @@
+{
+  "name": "SA-MP TD Studio",
+  "description": "Professional SA-MP & Open.MP TextDraw Editor with interactive 640x480 canvas, real GTA fonts, TXD sprites, and Pawn code export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
