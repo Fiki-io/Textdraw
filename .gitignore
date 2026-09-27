@@ -14,5 +14,17 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Environment / secrets
 .env
-debug.keystore
+app/.env
+
+# Release keystores — NEVER commit to repo (use GitHub Secrets)
+my-upload-key.jks
+*.keystore.old
+
+# Debug keystore IS committed (used by CI as fallback signing)
+# debug.keystore  <-- intentionally tracked
+
+# Gradle caches (local only)
+.gradle/

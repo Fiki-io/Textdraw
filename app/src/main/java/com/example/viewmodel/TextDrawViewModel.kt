@@ -105,7 +105,20 @@ class TextDrawViewModel(private val repository: TextDrawRepository) : ViewModel(
     fun moveElement(id: String, newX: Float, newY: Float) {
         _elements.value = _elements.value.map {
             if (it.id == id && !it.isLocked) {
-                it.copy(posX = newX, posY = newY)
+                if (it.font == 4 || it.font == 5) {
+                    // SA-MP sprites/models: textSizeX = endX, textSizeY = endY
+                    // Shift endX and endY by the same delta to keep size constant
+                    val deltaX = newX - it.posX
+                    val deltaY = newY - it.posY
+                    it.copy(
+                        posX = newX,
+                        posY = newY,
+                        textSizeX = (it.textSizeX + deltaX).coerceAtMost(640f),
+                        textSizeY = (it.textSizeY + deltaY).coerceAtMost(480f)
+                    )
+                } else {
+                    it.copy(posX = newX, posY = newY)
+                }
             } else it
         }
         autoSave()
@@ -119,13 +132,25 @@ class TextDrawViewModel(private val repository: TextDrawRepository) : ViewModel(
         saveSnapshotForUndo()
         val nextX = (current.posX + deltaX).coerceIn(0f, 640f)
         val nextY = (current.posY + deltaY).coerceIn(0f, 480f)
-        updateElement(current.copy(posX = nextX, posY = nextY))
+
+        val updated = if (current.font == 4 || current.font == 5) {
+            // SA-MP sprites/models: keep size by also shifting endX/endY
+            current.copy(
+                posX = nextX,
+                posY = nextY,
+                textSizeX = (current.textSizeX + deltaX).coerceIn(0f, 640f),
+                textSizeY = (current.textSizeY + deltaY).coerceIn(0f, 480f)
+            )
+        } else {
+            current.copy(posX = nextX, posY = nextY)
+        }
+        updateElement(updated)
     }
 
     fun addNewElement(
         varName: String = "TD_Element_${_elements.value.size + 1}",
         text: String = "GTA San Andreas",
-        font: Int = 2
+        font: Int = 1  // Font 1 = Standard/Chalet — most common SA-MP TextDraw font
     ) {
         saveSnapshotForUndo()
         val newEl = TextDrawElement(
@@ -149,19 +174,24 @@ class TextDrawViewModel(private val repository: TextDrawRepository) : ViewModel(
     fun addNewSpriteElement(spriteTag: String = "hud:radar_light") {
         saveSnapshotForUndo()
         val count = _elements.value.size + 1
-        // Offset slightly if there are existing elements so they don't hide each other
+        // Offset slightly so sprites don’t stack on each other
         val offset = (count * 15f) % 120f
+        val spX = 260f + offset
+        val spY = 180f + offset
+        val spW = 40f  // desired sprite width in SA-MP virtual units
+        val spH = 40f  // desired sprite height
         val newEl = TextDrawElement(
             id = UUID.randomUUID().toString(),
             varName = "TD_Sprite_$count",
             text = spriteTag,
             font = 4,
-            posX = 260f + offset,
-            posY = 180f + offset,
+            posX = spX,
+            posY = spY,
             letterSizeX = 0.0f,
             letterSizeY = 0.0f,
-            textSizeX = 40f,
-            textSizeY = 40f,
+            // SA-MP: textSizeX = END-X (right edge), textSizeY = END-Y (bottom edge)
+            textSizeX = spX + spW,
+            textSizeY = spY + spH,
             color = 0xFFFFFFFFL,
             zIndex = _elements.value.size
         )
@@ -174,18 +204,23 @@ class TextDrawViewModel(private val repository: TextDrawRepository) : ViewModel(
         saveSnapshotForUndo()
         val count = _elements.value.size + 1
         val offset = (count * 15f) % 120f
+        val mdX = 260f + offset
+        val mdY = 180f + offset
+        val mdW = 65f  // desired model frame width
+        val mdH = 65f  // desired model frame height
         val newEl = TextDrawElement(
             id = UUID.randomUUID().toString(),
             varName = "TD_Model_$count",
             text = "LD_SPAC:white",
             font = 5,
             modelId = modelId,
-            posX = 260f + offset,
-            posY = 180f + offset,
+            posX = mdX,
+            posY = mdY,
             letterSizeX = 0.0f,
             letterSizeY = 0.0f,
-            textSizeX = 65f,
-            textSizeY = 65f,
+            // SA-MP: textSizeX = END-X, textSizeY = END-Y
+            textSizeX = mdX + mdW,
+            textSizeY = mdY + mdH,
             color = 0xFFFFFFFFL,
             zIndex = _elements.value.size
         )

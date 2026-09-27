@@ -572,10 +572,15 @@ private fun SpriteElementInspector(
         // Section: Position & Size
         ImGuiCollapsingHeader(label = "Transform (Position & Size)") {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // SA-MP: posX = left edge, posY = top edge
                 ImGuiDragFloat(
                     label = "Pos X",
                     value = element.posX,
-                    onValueChange = { onElementChanged(element.copy(posX = it)) },
+                    onValueChange = { newPosX ->
+                        // Keep same visual width: endX shifts with posX
+                        val currentW = (element.textSizeX - element.posX).coerceAtLeast(4f)
+                        onElementChanged(element.copy(posX = newPosX, textSizeX = newPosX + currentW))
+                    },
                     min = 0f,
                     max = 640f,
                     speed = 1.0f
@@ -583,7 +588,10 @@ private fun SpriteElementInspector(
                 ImGuiDragFloat(
                     label = "Pos Y",
                     value = element.posY,
-                    onValueChange = { onElementChanged(element.copy(posY = it)) },
+                    onValueChange = { newPosY ->
+                        val currentH = (element.textSizeY - element.posY).coerceAtLeast(4f)
+                        onElementChanged(element.copy(posY = newPosY, textSizeY = newPosY + currentH))
+                    },
                     min = 0f,
                     max = 480f,
                     speed = 1.0f
@@ -591,19 +599,28 @@ private fun SpriteElementInspector(
 
                 Spacer(modifier = Modifier.height(2.dp))
 
+                // Display width/height (computed from endX - posX)
+                val displayWidth  = (element.textSizeX - element.posX).coerceAtLeast(0f)
+                val displayHeight = (element.textSizeY - element.posY).coerceAtLeast(0f)
+
                 ImGuiDragFloat(
                     label = "Width",
-                    value = element.textSizeX,
-                    onValueChange = { onElementChanged(element.copy(textSizeX = it)) },
-                    min = 2f,
+                    value = displayWidth,
+                    onValueChange = { newW ->
+                        // textSizeX = posX + newWidth (end-X in SA-MP coords)
+                        onElementChanged(element.copy(textSizeX = element.posX + newW.coerceAtLeast(4f)))
+                    },
+                    min = 4f,
                     max = 640f,
                     speed = 1.0f
                 )
                 ImGuiDragFloat(
                     label = "Height",
-                    value = element.textSizeY,
-                    onValueChange = { onElementChanged(element.copy(textSizeY = it)) },
-                    min = 2f,
+                    value = displayHeight,
+                    onValueChange = { newH ->
+                        onElementChanged(element.copy(textSizeY = element.posY + newH.coerceAtLeast(4f)))
+                    },
+                    min = 4f,
                     max = 480f,
                     speed = 1.0f
                 )
@@ -625,7 +642,11 @@ private fun SpriteElementInspector(
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(ImGuiButton)
                                 .clickable {
-                                    onElementChanged(element.copy(textSizeX = dims.first, textSizeY = dims.second))
+                                    // Store as endX/endY
+                                    onElementChanged(element.copy(
+                                        textSizeX = element.posX + dims.first,
+                                        textSizeY = element.posY + dims.second
+                                    ))
                                 }
                                 .padding(vertical = 3.dp),
                             contentAlignment = Alignment.Center

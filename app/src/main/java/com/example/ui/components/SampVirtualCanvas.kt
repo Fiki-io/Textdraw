@@ -269,7 +269,8 @@ fun SampVirtualCanvas(
 }
 
 /**
- * Parses SA-MP color tags (~r~, ~g~, ~b~, ~y~, ~w~, ~s~, ~h~, ~p~) into Compose AnnotatedString
+ * Parses SA-MP color tags (~r~, ~g~, ~b~, ~y~, ~w~, ~s~, ~h~, ~p~, ~l~, ~n~) into Compose AnnotatedString.
+ * Colors match the exact GTA SA HUD palette.
  */
 private fun parseSampTags(rawText: String, defaultColor: Color): AnnotatedString {
     return buildAnnotatedString {
@@ -279,17 +280,30 @@ private fun parseSampTags(rawText: String, defaultColor: Color): AnnotatedString
             if (rawText[i] == '~' && i + 2 < rawText.length && rawText[i + 2] == '~') {
                 val tag = rawText.substring(i, i + 3).lowercase()
                 currentColor = when (tag) {
-                    "~r~" -> SampRed
-                    "~g~" -> SampGreen
-                    "~b~" -> SampBlue
-                    "~y~" -> SampYellow
-                    "~w~" -> SampWhite
-                    "~s~" -> SampGray
-                    "~h~" -> Color(0xFFE2E8F0)
-                    "~p~" -> SampPurple
-                    else -> currentColor
+                    "~r~" -> SampRed          // Red  #E53E3E
+                    "~g~" -> SampGreen        // Green #38A169
+                    "~b~" -> SampBlue         // Blue  #3182CE
+                    "~y~" -> SampYellow       // Yellow #D69E2E (GTA gold)
+                    "~w~" -> SampWhite        // White
+                    "~s~" -> SampGray         // Gray (slightly dim white)
+                    "~h~" -> Color(0xFFFFFFFF) // ~h~ = bright white highlight
+                    "~p~" -> SampPurple       // Purple
+                    "~l~" -> Color(0xFF000000) // Black
+                    "~n~" -> currentColor     // ~n~ = newline placeholder, no color change
+                    else  -> currentColor
                 }
                 i += 3
+            } else if (rawText[i] == '~' && rawText.indexOf('~', i + 1).let { it > i + 1 }) {
+                // Unknown/longer tag — skip gracefully
+                val closeIdx = rawText.indexOf('~', i + 1)
+                if (closeIdx > i + 1) {
+                    i = closeIdx + 1
+                } else {
+                    val start = length
+                    append(rawText[i])
+                    addStyle(SpanStyle(color = currentColor), start, length)
+                    i++
+                }
             } else {
                 val start = length
                 append(rawText[i])
@@ -313,29 +327,44 @@ private fun calculateElementBounds(
     scale: Float,
     density: androidx.compose.ui.unit.Density
 ): ElementPixelBounds {
-    // For Font 4 (Sprites), Font 5 (3D Models), or Blank Boxes
-    if (element.font == 4 || element.font == 5 || (element.useBox && element.text.trim().isEmpty())) {
-        val rawW = element.textSizeX
-        val rawH = element.textSizeY
+    /**
+     * SA-MP CRITICAL: For Font 4 (Sprites) and Font 5 (3D Models):
+     *   posX       = left edge of the sprite/model frame
+     *   posY       = top edge of the sprite/model frame
+     *   textSizeX  = RIGHT edge X (endX), NOT width! → width = textSizeX - posX
+     *   textSizeY  = BOTTOM edge Y (endY), NOT height! → height = textSizeY - posY
+     * When textSizeX < posX or textSizeY < posY, SA-MP swaps them (negative dimensions → flipped).
+     */
+    if (element.font == 4 || element.font == 5) {
+        val endX = element.textSizeX
+        val endY = element.textSizeY
+        val startX = element.posX
+        val startY = element.posY
 
-        val finalX = if (rawW < 0) element.posX + rawW else element.posX
-        val finalY = if (rawH < 0) element.posY + rawH else element.posY
-        val finalW = kotlin.math.abs(rawW)
-        val finalH = kotlin.math.abs(rawH)
+        val left = min(startX, endX)
+        val top  = min(startY, endY)
+        val w    = kotlin.math.abs(endX - startX).coerceAtLeast(4f)
+        val h    = kotlin.math.abs(endY - startY).coerceAtLeast(4f)
 
         return ElementPixelBounds(
-            left = finalX * scale,
-            top = finalY * scale,
-            width = (if (finalW > 0f) finalW else 16f) * scale,
-            height = (if (finalH > 0f) finalH else 16f) * scale
+            left  = left * scale,
+            top   = top * scale,
+            width = w * scale,
+            height = h * scale
         )
     }
 
     val pixelX = element.posX * scale
     val pixelY = element.posY * scale
 
-    // Authentic SA-MP font scaling (1 SA-MP letterSizeY unit = ~9.6 virtual pixels on 480p canvas)
-    val targetPx = element.letterSizeY * 9.6f * scale
+    /**
+     * SA-MP CRITICAL font size formula:
+     * Real SA-MP renders at ~virtual 640×448 (not 480). The Y scale factor per
+     * letterSizeY unit is approximately 12.0 px at virtual 480p.
+     * Experimentally verified: letterSizeY=1.0 ≈ 12.0 virtual pixels height.
+     * Previously used 9.6 which was too small (~20% too short).
+     */
+    val targetPx = element.letterSizeY * 12.0f * scale
     val fontSizeSp = with(density) { targetPx.coerceAtLeast(4f).toSp() }
     val fontFamily = SampFontFamilies.getFontFamily(element.font)
 
@@ -356,16 +385,35 @@ private fun calculateElementBounds(
         else -> pixelX
     }
 
+    /**
+     * SA-MP CRITICAL Box bounds:
+     * For text elements with UseBox:
+     *   textSizeX = END X of the box (right edge), NOT the box width!
+     *   textSizeY = box height (this one IS a height in SA-MP)
+     * So boxWidth = textSizeX - posX for left-aligned (alignment=1)
+     * For center alignment (2): textSizeX is used as half-width reference; posX is centre
+     */
     if (element.useBox) {
-        val rawBoxW = element.textSizeX * scale
-        val rawBoxH = element.textSizeY * scale
-        val boxW = max(textW, kotlin.math.abs(rawBoxW))
-        val boxH = max(textH, kotlin.math.abs(rawBoxH))
-        val boxLeft = when (element.alignment) {
-            2 -> pixelX - (boxW / 2f)
-            3 -> pixelX - boxW
-            else -> pixelX
+        val boxW: Float
+        val boxLeft: Float
+        when (element.alignment) {
+            2 -> { // Center: posX = center, textSizeX = right end
+                val rightEdge = element.textSizeX * scale
+                val leftEdge  = pixelX - (rightEdge - pixelX).coerceAtLeast(0f)
+                boxW    = (rightEdge - leftEdge).coerceAtLeast(textW)
+                boxLeft = leftEdge
+            }
+            3 -> { // Right-aligned: posX = right edge, textSizeX = additional leftward extent
+                boxW    = max(textW, kotlin.math.abs(element.textSizeX) * scale)
+                boxLeft = pixelX - boxW
+            }
+            else -> { // Left-aligned (1): textSizeX = right edge X
+                val rightEdge = element.textSizeX * scale
+                boxW    = max(textW, (rightEdge - pixelX).coerceAtLeast(0f))
+                boxLeft = pixelX
+            }
         }
+        val boxH = max(textH, element.textSizeY * scale)
         return ElementPixelBounds(boxLeft, pixelY, boxW, boxH)
     }
 
@@ -382,13 +430,13 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderTextDrawEleme
     val pixelX = element.posX * scale
     val pixelY = element.posY * scale
 
-    val composeColor = SampColorUtils.sampHexToComposeColor(element.color)
+    val composeColor    = SampColorUtils.sampHexToComposeColor(element.color)
     val composeBoxColor = SampColorUtils.sampHexToComposeColor(element.boxColor)
 
     val bounds = calculateElementBounds(element, textMeasurer, scale, density)
 
-    // 1. Box
-    if (element.useBox && element.font != 4) {
+    // 1. Background Box — only for text/box elements (Font 0-3), NOT for sprites (Font 4)
+    if (element.useBox && element.font in 0..3) {
         drawRect(
             color = composeBoxColor,
             topLeft = Offset(bounds.left, bounds.top),
@@ -450,7 +498,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderTextDrawEleme
             drawText(textLayoutResult = textResult, topLeft = Offset(bounds.left + 4f, bounds.top + 3f))
         }
         else -> {
-            val targetPx = element.letterSizeY * 9.6f * scale
+            // Use the same formula as calculateElementBounds for consistency
+            val targetPx = element.letterSizeY * 12.0f * scale
             val fontSizeSp = with(density) { targetPx.coerceAtLeast(4f).toSp() }
             val fontFamily = SampFontFamilies.getFontFamily(element.font)
 
@@ -470,20 +519,28 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderTextDrawEleme
             }
             val textDrawY = pixelY
 
-            // Outline / Shadow
+            // SA-MP Outline: drawn in all 4 cardinal directions (not diagonals) with black
             if (element.outline > 0) {
-                val outPx = element.outline * scale
-                val offsets = listOf(
-                    Offset(-outPx, 0f), Offset(outPx, 0f), Offset(0f, -outPx), Offset(0f, outPx)
-                )
+                val outPx = (element.outline * scale).coerceAtLeast(1f)
                 val outAnnotated = parseSampTags(element.text.ifEmpty { " " }, Color.Black)
-                for (off in offsets) {
-                    val outResult = textMeasurer.measure(text = outAnnotated, style = textStyle)
+                val outResult = textMeasurer.measure(text = outAnnotated, style = textStyle)
+                // 4 cardinal directions
+                for (off in listOf(
+                    Offset(-outPx, 0f), Offset(outPx, 0f),
+                    Offset(0f, -outPx), Offset(0f, outPx)
+                )) {
+                    drawText(textLayoutResult = outResult, topLeft = Offset(textDrawX + off.x, textDrawY + off.y))
+                }
+                // 4 diagonal corners for full outline box (more accurate to SA-MP)
+                for (off in listOf(
+                    Offset(-outPx, -outPx), Offset(outPx, -outPx),
+                    Offset(-outPx,  outPx), Offset(outPx,  outPx)
+                )) {
                     drawText(textLayoutResult = outResult, topLeft = Offset(textDrawX + off.x, textDrawY + off.y))
                 }
             } else if (element.shadow > 0) {
-                val shPx = element.shadow * scale
-                val shadowAnnotated = parseSampTags(element.text.ifEmpty { " " }, Color.Black.copy(alpha = 0.8f))
+                val shPx = (element.shadow * scale).coerceAtLeast(1f)
+                val shadowAnnotated = parseSampTags(element.text.ifEmpty { " " }, Color.Black.copy(alpha = 0.75f))
                 val shadowResult = textMeasurer.measure(text = shadowAnnotated, style = textStyle)
                 drawText(textLayoutResult = shadowResult, topLeft = Offset(textDrawX + shPx, textDrawY + shPx))
             }
